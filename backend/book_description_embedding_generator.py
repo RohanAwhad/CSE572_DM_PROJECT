@@ -18,8 +18,7 @@ def get_embedding(text):
         outputs = model(**inputs)
 
     embeddings = outputs.last_hidden_state.to(device)
-    # Mean pool over the token embeddings to get a single vector for the input
-    embedding_vector = embeddings[:, 1:-1, :].mean(dim=1)
+    embedding_vector = embeddings[:, 0, :]
 
     embedding_list = embedding_vector.squeeze().cpu().numpy().tolist()
     return embedding_list
