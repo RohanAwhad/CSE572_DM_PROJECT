@@ -1,4 +1,5 @@
 from transformers import AutoTokenizer, AutoModel
+from tqdm import tqdm
 import torch
 import json
 import functools  # Import functools for lru_cache
@@ -31,14 +32,11 @@ def _load_model():
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
     model = model.to(device)
-
     model.eval()
     return tokenizer, model
 
 
 EMBEDDING_BATCH_SIZE = 8
-
-
 @torch.no_grad()
 def embed(chunks: list[str], mode: str) -> Optional[list[list[float]]]:
     if mode not in ["sentence", "query"]:
@@ -70,8 +68,8 @@ def generate_description_embedding(file_path: str) -> Dict[str, list[float]]:
     book_ids = []
 
     # Collect descriptions and book_ids for batching
-    with open(file_path, 'r') as file:
-        for line in file:
+    with open(file_path, 'r') as fstream:
+        for line in fstream:
             try:
                 row = json.loads(line)
                 description = row.get("description")
@@ -87,8 +85,9 @@ def generate_description_embedding(file_path: str) -> Dict[str, list[float]]:
                 if len(descriptions) == EMBEDDING_BATCH_SIZE:
                     embeddings = embed(descriptions, mode="sentence")
                     result.update(dict(zip(book_ids, embeddings)))
-                    descriptions.clear()
-                    book_ids.clear()
+                    descriptions = []
+                    book_ids = []
+                    if (len(result) % 100) == 0: print(f'{len(result)} books embedded')
 
             except json.JSONDecodeError:
                 print("Invalid JSON format in line:", line)
@@ -103,5 +102,5 @@ def generate_description_embedding(file_path: str) -> Dict[str, list[float]]:
 
 if __name__ == '__main__':
     # Test the embedding generation function
-    res = generate_description_embedding("books_1000.json")
+    res = generate_description_embedding("../data/books_1000.json")
     print(res)
