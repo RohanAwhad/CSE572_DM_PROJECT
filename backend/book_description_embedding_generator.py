@@ -102,5 +102,17 @@ def generate_description_embedding(file_path: str) -> Dict[str, list[float]]:
 
 if __name__ == '__main__':
     # Test the embedding generation function
-    res = generate_description_embedding("../data/books_1000.json")
-    print(res)
+    import numpy as np
+    import pickle
+
+    res = generate_description_embedding("../data/goodreads_books.json")
+    #res = generate_description_embedding("../tiny_data/books_1000.json")
+    all_book_ids, all_embeddings = [], []
+    for k, v in res.items():
+        all_book_ids.append(k)
+        all_embeddings.append(v)
+
+    all_embeddings = np.array(all_embeddings)
+    with open("../data/all_book_ids.pkl", "wb") as f: pickle.dump(all_book_ids, f)
+    np.save("../data/all_desc_embeddings.npy", all_embeddings)
+    print('Number of embeddings:', len(all_embeddings))
