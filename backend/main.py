@@ -70,14 +70,14 @@ if os.path.exists(TRAIN_USER_IDS_FP) and os.path.exists(TEST_USER_IDS_FP) and os
     book_to_users_df = pd.read_parquet(BOOK2USERS_FP)
 
     # set user_id in user_to_books_df as str and books as list[str]
-    # set book_id in book_to_users_df as str and users as list[str]
     #user_to_books_df['user_id'] = user_to_books_df['user_id'].astype(str)
     #user_to_books_df['books'] = user_to_books_df['books'].apply(lambda x: list(map(str, x)))
-    #user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
+    user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
 
+    # set book_id in book_to_users_df as str and users as list[str]
     #book_to_users_df['book_id'] = book_to_users_df['book_id'].astype(str)
     #book_to_users_df['users'] = book_to_users_df['users'].apply(lambda x: list(map(str, x)))
-    #book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
+    book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
 
 
 else:
@@ -117,13 +117,13 @@ else:
 
     print('#  Creating user 2 books dict')
     user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
-    user_to_books_df = user_to_books_df.withColumn('user_id', col('user_id').cast('string'))
-    user_to_books_df = user_to_books_df.withColumn('books', col('books').cast('array<string>'))
+    #user_to_books_df = user_to_books_df.withColumn('user_id', col('user_id').cast('string'))
+    #user_to_books_df = user_to_books_df.withColumn('books', col('books').cast('array<string>'))
 
     print('#  Creating book 2 users dict')
     book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
-    book_to_users_df = book_to_users_df.withColumn('book_id', col('book_id').cast('string'))
-    book_to_users_df = book_to_users_df.withColumn('users', col('users').cast('array<string>'))
+    #book_to_users_df = book_to_users_df.withColumn('book_id', col('book_id').cast('string'))
+    #book_to_users_df = book_to_users_df.withColumn('users', col('users').cast('array<string>'))
 
     print('#  collapsing partitioned parquet files into 1')
     user_to_books_df.coalesce(1).write.mode("overwrite").parquet(USER2BOOKS_FP)
@@ -216,12 +216,12 @@ def reciprocal_rank_fusion(rankings, k=60):
       fused_scores[item] += 1 / (rank + k)
   return [item for item, _ in fused_scores.most_common()]
 
-def recommendations(user_id, book_ids, n):
+def recommendations(user_id: str, book_ids: list[str], n):
   if len(book_ids) == 0:
     return get_top_books(book_ids, n)
   
   top_books = [book for book in get_top_books(book_ids, n) if book not in book_ids]
-  cf_books = collaborative_filtering(user_id, book_ids, n)
+  cf_books = list(map(str, collaborative_filtering(int(user_id), list(map(int, book_ids)), n)))
   cb_books = content_based_filtering(book_ids, n)
   
   popularity_weight = 1 / (1 + np.exp(-len(book_ids)/20))
@@ -243,12 +243,12 @@ def recommendations(user_id, book_ids, n):
   return fused_ranking[:n]
 
 
-def get_top_books(read_book_ids, n=10) -> list[str]:
+def get_top_books(read_book_ids: list[str], n=10) -> list[str]:
   return BOOK_RATINGS.filter(lambda x: x not in read_book_ids).take(n)
 
 from sklearn.metrics.pairwise import cosine_distances
 
-def content_based_filtering(book_ids, n) -> list[str]:
+def content_based_filtering(book_ids: list[str], n) -> list[str]:
   # Check if any of the book_ids have embeddings
   valid_book_ids = [book_id for book_id in book_ids if book_id in book_id_to_index]
   
@@ -286,21 +286,19 @@ def content_based_filtering(book_ids, n) -> list[str]:
 
 
 
-def collaborative_filtering(user_id, book_ids, n) -> list[str]:
+def collaborative_filtering(user_id: int, book_ids: list[int], n) -> list[str]:
   # Find similar users who have read the same books
   similar_users = set()
   for book_id in book_ids:
     if book_id in book_to_users_df.index:
-      print(book_to_users_df.loc[book_id])
-      print(type(book_to_users_df.loc[book_id]))
-      print(type(book_to_users_df.loc[book_id][0]))
-      similar_users.update(book_to_users_df.loc[book_id])
+      print('Similar Users:', book_to_users_df.loc[book_id, 'users'])
+      similar_users.update(book_to_users_df.loc[book_id, 'users'])
 
   # Collect books read by similar users excluding those already read
   candidate_books = Counter()
   for similar_user in similar_users:
     if similar_user != user_id and similar_user in user_to_books_df.index:
-      for book_id in user_to_books_df.loc[similar_user]:
+      for book_id in user_to_books_df.loc[similar_user, 'books']:
         if book_id not in book_ids:
           candidate_books[book_id] += 1
 
@@ -311,8 +309,8 @@ def collaborative_filtering(user_id, book_ids, n) -> list[str]:
 
 if __name__ == '__main__':
   test_book_ids = list(test_book_set)
-  print(recommendations(test_user_ids[0], [], 10))
-  print(recommendations(test_user_ids[2], test_book_ids[:3], 10))
+  print('Recommendation 1:', recommendations(test_user_ids[0], [], 10))
+  print('Recommendation 2:', recommendations(test_user_ids[2], test_book_ids[:3], 10))
 
   import numpy as np
   from sklearn.metrics import ndcg_score
@@ -351,8 +349,8 @@ if __name__ == '__main__':
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
     for user_id in tqdm(test_users[:num_users_to_evaluate], total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
-      if user_id in user_to_books_df.index:
-        true_items = user_to_books_df.loc[user_id]
+      if int(user_id) in user_to_books_df.index:
+        true_items = list(map(str, user_to_books_df.loc[int(user_id), 'books']))
         
         # Split true items into history and test set
         history = true_items[:len(true_items)//2]
@@ -387,8 +385,8 @@ if __name__ == '__main__':
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
     for user_id in test_users[:num_users_to_evaluate]:
-      if user_id in user_to_books_df.index:
-        true_items = user_to_books_df.loc[user_id]
+      if int(user_id) in user_to_books_df.index:
+        true_items = list(map(str, user_to_books_df.loc[int(user_id), 'books']))
         
         # Get recommendations for cold start (empty history)
         predicted_items = recommendations(user_id, [], n=100)
