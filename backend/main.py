@@ -71,13 +71,13 @@ if os.path.exists(TRAIN_USER_IDS_FP) and os.path.exists(TEST_USER_IDS_FP) and os
 
     # set user_id in user_to_books_df as str and books as list[str]
     # set book_id in book_to_users_df as str and users as list[str]
-    user_to_books_df['user_id'] = user_to_books_df['user_id'].astype(str)
-    user_to_books_df['books'] = user_to_books_df['books'].apply(lambda x: list(map(str, x)))
-    user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
+    #user_to_books_df['user_id'] = user_to_books_df['user_id'].astype(str)
+    #user_to_books_df['books'] = user_to_books_df['books'].apply(lambda x: list(map(str, x)))
+    #user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
 
-    book_to_users_df['book_id'] = book_to_users_df['book_id'].astype(str)
-    book_to_users_df['users'] = book_to_users_df['users'].apply(lambda x: list(map(str, x)))
-    book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
+    #book_to_users_df['book_id'] = book_to_users_df['book_id'].astype(str)
+    #book_to_users_df['users'] = book_to_users_df['users'].apply(lambda x: list(map(str, x)))
+    #book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
 
 
 else:
@@ -108,13 +108,6 @@ else:
     num_test_users = int(0.2 * len(unique_user_ids))
     test_user_ids = unique_user_ids[:num_test_users]
     train_user_ids = unique_user_ids[num_test_users:]
-    #print('# Filter out rows with book_id in test_book_set')
-    #print('#   Broadcast sets')
-    #train_book_set_bc = spark.sparkContext.broadcast(set(train_book_set))
-    #train_user_ids_bc = spark.sparkContext.broadcast(set(train_user_ids))
-    #train_interactions_df = interactions_df.filter((col('book_id').isin(train_book_set_bc.value)) & (col('user_id').isin(train_user_ids_bc.value)))
-    #print('# Save')
-    #train_interactions_df.write.parquet(TRAIN_INTERACTION_PARQUET)
     with open(TRAIN_USER_IDS_FP, 'wb') as f: pickle.dump(train_user_ids, f)
     with open(TEST_USER_IDS_FP, 'wb') as f: pickle.dump(test_user_ids, f)
 
@@ -124,12 +117,28 @@ else:
 
     print('#  Creating user 2 books dict')
     user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
+    user_to_books_df = user_to_books_df.withColumn('user_id', col('user_id').cast('string'))
+    user_to_books_df = user_to_books_df.withColumn('books', col('books').cast('array<string>'))
+
     print('#  Creating book 2 users dict')
     book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
+    book_to_users_df = book_to_users_df.withColumn('book_id', col('book_id').cast('string'))
+    book_to_users_df = book_to_users_df.withColumn('users', col('users').cast('array<string>'))
+
     print('#  collapsing partitioned parquet files into 1')
     user_to_books_df.coalesce(1).write.mode("overwrite").parquet(USER2BOOKS_FP)
     book_to_users_df.coalesce(1).write.mode("overwrite").parquet(BOOK2USERS_FP)
+
+    # Load the Parquet files into Pandas DataFrames
+    user_to_books_df = pd.read_parquet(USER2BOOKS_FP)
+    book_to_users_df = pd.read_parquet(BOOK2USERS_FP)
+
+    # Set index for faster lookups
+    user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
+    book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
+
     spark.stop()
+
 
 
 
