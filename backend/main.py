@@ -2,6 +2,7 @@
 # Books Project
 # ===
 
+import time
 from pyspark import SparkContext
 from tqdm import tqdm
 import json
@@ -226,9 +227,16 @@ def recommendations(user_id: str, book_ids: list[str], n):
   if len(book_ids) == 0:
     return get_top_books(book_ids, n)
   
+  start = time.monotonic()
   top_books = [book for book in get_top_books(book_ids, n) if book not in book_ids]
+  top_end = time.monotonic()
   cf_books = collaborative_filtering(user_id, book_ids, n)
+  cf_end = time.monotonic()
   cb_books = content_based_filtering(book_ids, n)
+  cb_end = time.monotonic()
+  print(f'Time taken to get top books:', (top_end - start) * 1e3, 'ms')
+  print(f'Time taken to get cf books:', (cf_end - top_end) * 1e3, 'ms')
+  print(f'Time taken to get cb books:', (cb_end - cf_end) * 1e3, 'ms')
   
   popularity_weight = 1 / (1 + np.exp(-len(book_ids)/20))
   
