@@ -391,14 +391,14 @@ if __name__ == '__main__':
     return avg_results
 
   # Evaluate the model
-  #evaluation_results = evaluate_model(test_user_ids)
+  evaluation_results = evaluate_model(test_user_ids)
 
   # Print results
-  #for metric, value in evaluation_results.items():
-  #  print(f"{metric}: {value:.4f}")
+  for metric, value in evaluation_results.items():
+    print(f"{metric}: {value:.4f}")
 
 
-  #with open('evaluation_results.pkl', 'wb') as f: pickle.dump(evaluation_results, f)
+  with open('evaluation_results.pkl', 'wb') as f: pickle.dump(evaluation_results, f)
 
 
   # also evaluate for cold starts
@@ -423,16 +423,16 @@ if __name__ == '__main__':
     return avg_results
 
   # Evaluate the model for cold start
-  #cold_start_results = evaluate_cold_start(test_user_ids)
+  cold_start_results = evaluate_cold_start(test_user_ids)
 
   # Print cold start results
-  #print("\nCold Start Evaluation Results:")
-  #for metric, value in cold_start_results.items():
-  #  print(f"{metric}: {value:.4f}")
+  print("\nCold Start Evaluation Results:")
+  for metric, value in cold_start_results.items():
+    print(f"{metric}: {value:.4f}")
 
   # Save cold start results
-  #with open('cold_start_results.pkl', 'wb') as f:
-  #  pickle.dump(cold_start_results, f)
+  with open('cold_start_results.pkl', 'wb') as f:
+    pickle.dump(cold_start_results, f)
 
   import multiprocessing as mp
   from functools import partial
@@ -488,34 +488,34 @@ if __name__ == '__main__':
       avg_results = {metric: np.mean(values) for metric, values in all_results.items()}
       return avg_results
 
-  evaluation_results = parallel_evaluate_model(
-      test_users=test_user_ids,
-      user_to_books_df=user_to_books_df,
-      num_users_to_evaluate=10,
-      is_cold_start=False
-  )
-  print("\nEvaluation Results:")
-  for metric, value in cold_start_results.items():
-    print(f"{metric}: {value:.4f}")
+  #evaluation_results = parallel_evaluate_model(
+  #    test_users=test_user_ids,
+  #    user_to_books_df=user_to_books_df,
+  #    num_users_to_evaluate=10,
+  #    is_cold_start=False
+  #)
+  #print("\nEvaluation Results:")
+  #for metric, value in cold_start_results.items():
+  #  print(f"{metric}: {value:.4f}")
 
   # Cold start evaluation with parallel processing
-  cold_start_results = parallel_evaluate_model(
-      test_users=test_user_ids,
-      user_to_books_df=user_to_books_df,
-      num_users_to_evaluate=10,
-      is_cold_start=True
-  )
+  #cold_start_results = parallel_evaluate_model(
+  #    test_users=test_user_ids,
+  #    user_to_books_df=user_to_books_df,
+  #    num_users_to_evaluate=10,
+  #    is_cold_start=True
+  #)
 
   # Save results
-  with open('evaluation_results.pkl', 'wb') as f:
-      pickle.dump(evaluation_results, f)
+  #with open('evaluation_results.pkl', 'wb') as f:
+  #    pickle.dump(evaluation_results, f)
 
-  with open('cold_start_results.pkl', 'wb') as f:
-      pickle.dump(cold_start_results, f)
+  #with open('cold_start_results.pkl', 'wb') as f:
+  #    pickle.dump(cold_start_results, f)
 
-  print("\nCold Start Evaluation Results:")
-  for metric, value in cold_start_results.items():
-    print(f"{metric}: {value:.4f}")
+  #print("\nCold Start Evaluation Results:")
+  #for metric, value in cold_start_results.items():
+  #  print(f"{metric}: {value:.4f}")
 
   # Function to compare regular and cold start results
   def compare_results(regular_results, cold_start_results):
