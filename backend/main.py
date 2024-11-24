@@ -344,5 +344,95 @@ if __name__ == '__main__':
 
   with open('evaluation_results.pkl', 'wb') as f: pickle.dump(evaluation_results, f)
 
+
+  # also evaluate for cold starts
+  def evaluate_cold_start(test_users, num_users_to_evaluate=1000):
+    all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
+    
+    for user_id in test_users[:num_users_to_evaluate]:
+      if user_id in user_to_books_df.index:
+        true_items = user_to_books_df.loc[user_id]
+        
+        # Get recommendations for cold start (empty history)
+        predicted_items = recommendations(user_id, [], n=100)
+        
+        # Evaluate
+        results = evaluate_recommendations(true_items, predicted_items)
+        
+        for metric, value in results.items():
+          all_results[metric].append(value)
+    
+    # Calculate average results
+    avg_results = {metric: np.mean(values) for metric, values in all_results.items()}
+    return avg_results
+
+  # Evaluate the model for cold start
+  cold_start_results = evaluate_cold_start(test_user_ids)
+
+  # Print cold start results
+  print("\nCold Start Evaluation Results:")
+  for metric, value in cold_start_results.items():
+    print(f"{metric}: {value:.4f}")
+
+  # Save cold start results
+  with open('cold_start_results.pkl', 'wb') as f:
+    pickle.dump(cold_start_results, f)
+
+
+  # Function to compare regular and cold start results
+  def compare_results(regular_results, cold_start_results):
+    print("\nComparison of Regular and Cold Start Results:")
+    print("{:<15} {:<15} {:<15} {:<15}".format("Metric", "Regular", "Cold Start", "Difference"))
+    print("-" * 60)
+    for metric in regular_results.keys():
+      regular = regular_results[metric]
+      cold = cold_start_results[metric]
+      diff = regular - cold
+      print("{:<15} {:<15.4f} {:<15.4f} {:<15.4f}".format(metric, regular, cold, diff))
+
+  # Compare regular and cold start results
+  compare_results(evaluation_results, cold_start_results)
+
+  # Visualize the comparison
+  import matplotlib.pyplot as plt
+
+  def plot_comparison(regular_results, cold_start_results):
+    metrics = list(regular_results.keys())
+    regular_values = [regular_results[m] for m in metrics]
+    cold_start_values = [cold_start_results[m] for m in metrics]
+
+    x = range(len(metrics))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.bar([i - width/2 for i in x], regular_values, width, label='Regular')
+    ax.bar([i + width/2 for i in x], cold_start_values, width, label='Cold Start')
+
+    ax.set_ylabel('Score')
+    ax.set_title('Comparison of Regular and Cold Start Results')
+    ax.set_xticks(x)
+    ax.set_xticklabels(metrics, rotation=45, ha='right')
+    ax.legend()
+
+    plt.tight_layout()
+    plt.savefig('comparison_plot.png')
+    plt.close()
+
+  # Plot the comparison
+  plot_comparison(evaluation_results, cold_start_results)
+
+  print("\nComparison plot saved as 'comparison_plot.png'")
+
+  # Save all results
+  all_results = {
+    'regular_evaluation': evaluation_results,
+    'cold_start_evaluation': cold_start_results,
+  }
+
+  with open('all_results.pkl', 'wb') as f:
+    pickle.dump(all_results, f)
+
+  print("\nAll results saved in 'all_results.pkl'")
+
 sc.stop()
 
