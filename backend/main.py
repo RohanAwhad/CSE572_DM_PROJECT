@@ -50,6 +50,8 @@ INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/goodreads_interaction
 TRAIN_INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/train_interactions.parquet'
 TRAIN_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/train_user_ids.pkl'
 TEST_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/test_used_ids.pkl'
+USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books_dict.pkl'
+BOOK2USERS_FP = '/scratch/rawhad/CSE572/project/data/book_to_users_dict.pkl'
 
 spark = SparkSession.builder.appName('GoodreadsDataProcessing').getOrCreate()
 interactions_df = spark.read.parquet(INTERACTION_PARQUET).select('user_id', 'book_id')
@@ -60,15 +62,45 @@ random.shuffle(unique_user_ids)
 num_test_users = int(0.2 * len(unique_user_ids))
 test_user_ids = unique_user_ids[:num_test_users]
 train_user_ids = unique_user_ids[num_test_users:]
-print('# Filter out rows with book_id in test_book_set')
-print('#   Broadcast sets')
-train_book_set_bc = spark.sparkContext.broadcast(set(train_book_set))
-train_user_ids_bc = spark.sparkContext.broadcast(set(train_user_ids))
-train_interactions_df = interactions_df.filter((col('book_id').isin(train_book_set_bc.value)) & (col('user_id').isin(train_user_ids_bc.value)))
-print('# Save')
-train_interactions_df.write.parquet(TRAIN_INTERACTION_PARQUET)
+#print('# Filter out rows with book_id in test_book_set')
+#print('#   Broadcast sets')
+#train_book_set_bc = spark.sparkContext.broadcast(set(train_book_set))
+#train_user_ids_bc = spark.sparkContext.broadcast(set(train_user_ids))
+#train_interactions_df = interactions_df.filter((col('book_id').isin(train_book_set_bc.value)) & (col('user_id').isin(train_user_ids_bc.value)))
+#print('# Save')
+#train_interactions_df.write.parquet(TRAIN_INTERACTION_PARQUET)
 with open(TRAIN_USER_IDS_FP, 'wb') as f: pickle.dump(train_user_ids, f)
 with open(TEST_USER_IDS_FP, 'wb') as f: pickle.dump(test_user_ids, f)
+
+
+
+
+'''
+from collections import defaultdict
+
+# Convert interactions_df to dictionaries
+user_to_books = defaultdict(list)
+book_to_users = defaultdict(list)
+
+for row in interactions_df.select('user_id', 'book_id').rdd.collect():
+  user_to_books[row['user_id']].append(row['book_id'])
+  book_to_users[row['book_id']].append(row['user_id'])
+
+#how can I do this using pyspark?
+'''
+
+from pyspark.sql.functions import collect_list
+
+print('#  Creating user 2 books dict')
+user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
+user_to_books = {row['user_id']: row['books'] for row in user_to_books_df.collect()}
+print('#  Creating book 2 users dict')
+book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
+book_to_users = {row['book_id']: row['users'] for row in book_to_users_df.collect()}
+
+with open(USER2BOOKS_FP, 'wb') as f: pickle.dump(user_to_books, f)
+with open(BOOK2USERS_FP, 'wb') as f: pickle.dump(book_to_users, f)
+
 spark.stop()
 
 
@@ -161,23 +193,6 @@ def get_top_books(read_book_ids, n=10) -> list[str]:
 
 
 
-def collaborative_filtering(user_id, book_ids) -> list[str]:
-  # Example function to perform collaborative filtering
-  # Use RDDs or DataFrames to fetch similar users and find books
-  similar_users = interactions_df.filter(col('book_id').isin(book_ids) &
-                                         ~col('user_id').isin([user_id])) \
-                                  .select('user_id') \
-                                  .distinct() \
-                                  .rdd.flatMap(lambda x: x).collect()
-  recommended_books = interactions_df.filter(col('user_id').isin(similar_users) &
-                                             ~col('book_id').isin(book_ids)) \
-                                     .groupBy('book_id') \
-                                     .count() \
-                                     .orderBy('count', ascending=False) \
-                                     .select('book_id') \
-                                     .rdd.flatMap(lambda x: x).take(10)
-  return recommended_books
-
 from sklearn.metrics.pairwise import cosine_distances
 
 def content_based_filtering(book_ids) -> list[str]:
@@ -215,3 +230,49 @@ def content_based_filtering(book_ids) -> list[str]:
         break
 
   return unique_similar_books
+
+
+
+'''
+def collaborative_filtering(user_id, book_ids) -> list[str]:
+  # Example function to perform collaborative filtering
+  # Use RDDs or DataFrames to fetch similar users and find books
+  similar_users = interactions_df.filter(col('book_id').isin(book_ids) &
+                                         ~col('user_id').isin([user_id])) \
+                                  .select('user_id') \
+                                  .distinct() \
+                                  .rdd.flatMap(lambda x: x).collect()
+  recommended_books = interactions_df.filter(col('user_id').isin(similar_users) &
+                                             ~col('book_id').isin(book_ids)) \
+                                     .groupBy('book_id') \
+                                     .count() \
+                                     .orderBy('count', ascending=False) \
+                                     .select('book_id') \
+                                     .rdd.flatMap(lambda x: x).take(10)
+  return recommended_books
+
+
+i would first like to convert interactions_df into 2 dictionaries, one will have user_id as key and list of book_ids as values and the other will have book_id as key and list[user_ids] as values.
+And then use those to do collaborative filtering
+'''
+
+
+def collaborative_filtering(user_id, book_ids) -> list[str]:
+  # Find similar users who have read the same books
+  similar_users = set()
+  for book_id in book_ids:
+    if book_id in book_to_users:
+      similar_users.update(book_to_users[book_id])
+  similar_users.discard(user_id)  # Remove the input user
+
+  # Count book recommendations from similar users
+  book_recommendations = Counter()
+  for similar_user in similar_users:
+    for book in user_to_books.get(similar_user, []):
+      if book not in book_ids:
+        book_recommendations[book] += 1
+  
+  # Get top 10 recommended books
+  top_recommended_books = [book for book, _ in book_recommendations.most_common(10)]
+  
+  return top_recommended_books
