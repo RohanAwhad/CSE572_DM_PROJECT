@@ -325,31 +325,6 @@ def collaborative_filtering(user_id: str, book_ids: list[str], n) -> list[str]:
   return ranked_books
 
 
-'''
-# how do I make the recommendations fast?
-Recommendation 1: ['18283092', '27189830', '11371089', '29065952', '13598466', '30330416', '32615018', '6016342', '25918513', '15524469']
-type of book_ids[0]: <class 'str'>
-Time taken to get top books: 0.004667788743972778 ms
-Time taken to get cf books: 691.8498920276761 ms
-Time taken to get cb books: 3530.574862845242 ms
-Recommendation 2: ['18283092', '1574', '10099016', '27189830', '941', '33642771', '11371089', '613', '15823422', '29065952']
-Evaluating:   0%|                                                                                                                                                                                                                                                                                                                                                    | 0/1000 [00:00<?, ?it/s]type of book_ids[0]: <class 'str'>
-Time taken to get top books: 0.02619996666908264 ms
-Time taken to get cf books: 17156.324069947004 ms
-Time taken to get cb books: 3220.3661892563105 ms
-Evaluating:   0%|▎                                                                                                                                                                                                                                                                                                                                         | 1/1000 [00:20<5:39:19, 20.38s/it]type of book_ids[0]: <class 'str'>
-Time taken to get top books: 0.02926494926214218 ms
-Time taken to get cf books: 188.972654286772 ms
-Time taken to get cb books: 3677.435555960983 ms
-Evaluating:   0%|▋                                                                                                                                                                                                                                                                                                                                         | 2/1000 [00:24<2:57:26, 10.67s/it]type of book_ids[0]: <class 'str'>
-Time taken to get top books: 0.028452835977077484 ms
-Time taken to get cf books: 13.244841247797012 ms
-Time taken to get cb books: 0.010048970580101013 ms
-type of book_ids[0]: <class 'str'>
-
-
-
-'''
 
 if __name__ == '__main__':
   test_book_ids = list(test_book_set)
@@ -416,14 +391,14 @@ if __name__ == '__main__':
     return avg_results
 
   # Evaluate the model
-  evaluation_results = evaluate_model(test_user_ids)
+  #evaluation_results = evaluate_model(test_user_ids)
 
   # Print results
-  for metric, value in evaluation_results.items():
-    print(f"{metric}: {value:.4f}")
+  #for metric, value in evaluation_results.items():
+  #  print(f"{metric}: {value:.4f}")
 
 
-  with open('evaluation_results.pkl', 'wb') as f: pickle.dump(evaluation_results, f)
+  #with open('evaluation_results.pkl', 'wb') as f: pickle.dump(evaluation_results, f)
 
 
   # also evaluate for cold starts
@@ -448,17 +423,99 @@ if __name__ == '__main__':
     return avg_results
 
   # Evaluate the model for cold start
-  cold_start_results = evaluate_cold_start(test_user_ids)
+  #cold_start_results = evaluate_cold_start(test_user_ids)
 
   # Print cold start results
-  print("\nCold Start Evaluation Results:")
+  #print("\nCold Start Evaluation Results:")
+  #for metric, value in cold_start_results.items():
+  #  print(f"{metric}: {value:.4f}")
+
+  # Save cold start results
+  #with open('cold_start_results.pkl', 'wb') as f:
+  #  pickle.dump(cold_start_results, f)
+
+  import multiprocessing as mp
+  from functools import partial
+
+  def evaluate_single_user(user_id: str, user_to_books_df, is_cold_start=False):
+      """Evaluate recommendations for a single user"""
+      if user_id in user_to_books_df.index:
+          true_items = list(map(str, user_to_books_df.loc[user_id, 'books']))
+          
+          if is_cold_start:
+              # Cold start evaluation
+              predicted_items = recommendations(user_id, [], n=100)
+              results = evaluate_recommendations(true_items, predicted_items)
+          else:
+              # Regular evaluation
+              history = true_items[:len(true_items)//2]
+              test_set = true_items[len(true_items)//2:]
+              predicted_items = recommendations(user_id, history, n=100)
+              results = evaluate_recommendations(test_set, predicted_items)
+              
+          return results
+      return None
+
+  def parallel_evaluate_model(test_users, user_to_books_df, num_users_to_evaluate=10, is_cold_start=False):
+      """Parallel evaluation of the recommendation model"""
+      # Initialize metrics dictionary
+      all_metrics = ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 
+                    'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']
+      all_results = {metric: [] for metric in all_metrics}
+      
+      # Create a partial function with fixed arguments
+      evaluate_func = partial(evaluate_single_user, 
+                            user_to_books_df=user_to_books_df, 
+                            is_cold_start=is_cold_start)
+      
+      # Create process pool with 14 cores
+      with mp.Pool(processes=14) as pool:
+          # Evaluate users in parallel
+          user_subset = list(map(str, test_users[:num_users_to_evaluate]))
+          results = list(tqdm(
+              pool.imap(evaluate_func, user_subset),
+              total=len(user_subset),
+              desc='Evaluating'
+          ))
+          
+          # Aggregate results
+          for user_result in results:
+              if user_result is not None:
+                  for metric in all_metrics:
+                      all_results[metric].append(user_result[metric])
+      
+      # Calculate average results
+      avg_results = {metric: np.mean(values) for metric, values in all_results.items()}
+      return avg_results
+
+  evaluation_results = parallel_evaluate_model(
+      test_users=test_user_ids,
+      user_to_books_df=user_to_books_df,
+      num_users_to_evaluate=10,
+      is_cold_start=False
+  )
+  print("\nEvaluation Results:")
   for metric, value in cold_start_results.items():
     print(f"{metric}: {value:.4f}")
 
-  # Save cold start results
-  with open('cold_start_results.pkl', 'wb') as f:
-    pickle.dump(cold_start_results, f)
+  # Cold start evaluation with parallel processing
+  cold_start_results = parallel_evaluate_model(
+      test_users=test_user_ids,
+      user_to_books_df=user_to_books_df,
+      num_users_to_evaluate=10,
+      is_cold_start=True
+  )
 
+  # Save results
+  with open('evaluation_results.pkl', 'wb') as f:
+      pickle.dump(evaluation_results, f)
+
+  with open('cold_start_results.pkl', 'wb') as f:
+      pickle.dump(cold_start_results, f)
+
+  print("\nCold Start Evaluation Results:")
+  for metric, value in cold_start_results.items():
+    print(f"{metric}: {value:.4f}")
 
   # Function to compare regular and cold start results
   def compare_results(regular_results, cold_start_results):
@@ -515,3 +572,8 @@ if __name__ == '__main__':
 
   print("\nAll results saved in 'all_results.pkl'")
 
+'''
+
+i want to use 14 of my cores to generate recommendations for the evaluation functions : `evaluate_model` and `evaluate_cold_start`
+how do I use multiprocessing pools for this
+'''
