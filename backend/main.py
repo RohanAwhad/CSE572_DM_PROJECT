@@ -291,6 +291,9 @@ def collaborative_filtering(user_id, book_ids, n) -> list[str]:
   similar_users = set()
   for book_id in book_ids:
     if book_id in book_to_users_df.index:
+      print(book_to_users_df.loc[book_id])
+      print(type(book_to_users_df.loc[book_id]))
+      print(type(book_to_users_df.loc[book_id][0]))
       similar_users.update(book_to_users_df.loc[book_id])
 
   # Collect books read by similar users excluding those already read
