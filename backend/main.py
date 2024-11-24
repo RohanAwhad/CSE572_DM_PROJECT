@@ -7,9 +7,9 @@ import json
 import pickle
 import random
 
-BOOK_JSON: str = '../data/goodreads_books.jsonl'
-TRAIN_BOOK_IDS_FP: str = '../data/train_book_ids.pkl'
-TEST_BOOK_IDS_FP: str = '../data/test_book_ids.pkl'
+BOOK_JSON: str = '/scratch/rawhad/CSE572/project/data/goodreads_books.json'
+TRAIN_BOOK_IDS_FP: str = '/scratch/rawhad/CSE572/project/data/train_book_ids.pkl'
+TEST_BOOK_IDS_FP: str = '/scratch/rawhad/CSE572/project/data/test_book_ids.pkl'
 
 # Initialize Spark context
 sc: SparkContext = SparkContext(appName="BookSplit")
@@ -46,10 +46,10 @@ sc.stop()
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 # select 20% users
-INTERACTION_PARQUET = '../data/goodreads_interactions.parquet'
-TRAIN_INTERACTION_PARQUET = '../data/train_interactions.parquet'
-TRAIN_USER_IDS_FP = '../data/train_user_ids.pkl'
-TEST_USER_IDS_FP = '../data/test_used_ids.pkl'
+INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/goodreads_interactions.parquet'
+TRAIN_INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/train_interactions.parquet'
+TRAIN_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/train_user_ids.pkl'
+TEST_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/test_used_ids.pkl'
 
 spark = SparkSession.builder.appName('GoodreadsDataProcessing').getOrCreate()
 interactions_df = spark.read.parquet(INTERACTION_PARQUET).select('user_id', 'book_id')
@@ -84,8 +84,8 @@ spark.stop()
 # ===
 # Book Description Embeddings Matrix 
 # ===
-BOOK_IDS_PKL = ''  # book_ids with embeddings of description
-EMBEDDINGS_NPY = ''  # embeddings[idx] are embeddings of book[book_ids[idx]]['desc']
+BOOK_IDS_PKL = '/scratch/rawhad/CSE572/project/data/all_book_ids.pkl'  # book_ids with embeddings of description
+EMBEDDINGS_NPY = '/scratch/rawhad/CSE572/project/data/all_embeddings.npy'  # embeddings[idx] are embeddings of book[book_ids[idx]]['desc']
 
 # create an embedding matrix for books in training set
 # laod book_ids_pkl => list[book_ids] and EMBEDDINGS_NPY => np.array(len(book_ids), 384)
@@ -103,7 +103,7 @@ train_embedding_indices = [book_id_to_index[book_id] for book_id in train_book_s
 # Extract embeddings for the train set
 train_book_embeddings = embeddings[train_embedding_indices]
 # Save train book embeddings
-TRAIN_BOOK_EMBEDDINGS_NPY = '../data/train_book_embeddings.npy'
+TRAIN_BOOK_EMBEDDINGS_NPY = '/scratch/rawhad/CSE572/project/data/train_book_embeddings.npy'
 np.save(TRAIN_BOOK_EMBEDDINGS_NPY, train_book_embeddings)
 
 
