@@ -215,9 +215,7 @@ def recommendations(user_id, book_ids):
 
 
 def get_top_books(read_book_ids, n=10) -> list[str]:
-  return BOOK_RATINGS.filter(lambda x: x['book_id'] not in read_book_ids).take(n)
-
-
+  return BOOK_RATINGS.filter(lambda x: x not in read_book_ids).take(n)
 
 from sklearn.metrics.pairwise import cosine_distances
 
@@ -263,22 +261,23 @@ def collaborative_filtering(user_id, book_ids) -> list[str]:
   # Find similar users who have read the same books
   similar_users = set()
   for book_id in book_ids:
-    if book_id in book_to_users:
-      similar_users.update(book_to_users[book_id])
-  similar_users.discard(user_id)  # Remove the input user
+    if book_id in book_to_users_df.index:
+      similar_users.update(book_to_users_df.loc[book_id])
 
-  # Count book recommendations from similar users
-  book_recommendations = Counter()
+  # Collect books read by similar users excluding those already read
+  candidate_books = Counter()
   for similar_user in similar_users:
-    for book in user_to_books.get(similar_user, []):
-      if book not in book_ids:
-        book_recommendations[book] += 1
-  
-  # Get top 10 recommended books
-  top_recommended_books = [book for book, _ in book_recommendations.most_common(10)]
-  
-  return top_recommended_books
+    if similar_user != user_id and similar_user in user_to_books_df.index:
+      for book_id in user_to_books_df.loc[similar_user]:
+        if book_id not in book_ids:
+          candidate_books[book_id] += 1
+
+  # Rank books by the number of similar users who read them
+  ranked_books = [book_id for book_id, _ in candidate_books.most_common(10)]
+  return ranked_books
 
 
 if __name__ == '__main__':
-    print(recommendations(test_user_ids[0], []))
+  test_book_ids = list(test_book_set)
+  print(recommendations(test_user_ids[0], []))
+  print(recommendations(test_user_ids[2], test_book_ids[:3]))
