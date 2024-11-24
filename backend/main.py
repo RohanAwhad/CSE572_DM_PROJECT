@@ -53,7 +53,43 @@ TEST_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/test_used_ids.pkl'
 USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books_dict.pkl'
 BOOK2USERS_FP = '/scratch/rawhad/CSE572/project/data/book_to_users_dict.pkl'
 
-spark = SparkSession.builder.appName('GoodreadsDataProcessing').getOrCreate()
+spark = SparkSession.builder \
+        .appName('GoodreadsDataProcessing') \
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+        .config("spark.dynamicAllocation.enabled", "true") \
+        .config("spark.dynamicAllocation.minExecutors", "1") \
+        .config("spark.dynamicAllocation.maxExecutors", "10") \
+        .config("spark.sql.shuffle.partitions", "1200") \
+        .config("spark.executor.memory", "250g") \
+        .config("spark.driver.memory", "250g") \
+        .config("spark.memory.offHeap.enabled",True) \
+        .config("spark.memory.offHeap.size","256g") \
+        .config("spark.shuffle.compress", True) \
+        .config("spark.shuffle.spill.compress", True) \
+        .config("spark.executor.memoryOverhead", "10g")  \
+        .config("spark.driver.maxResultSize", "10g") \
+        .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+        .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+        .getOrCreate()
+'''
+spark = SparkSession.builder \
+  .appName('GoodreadsDataProcessing') \
+  .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+  .config("spark.dynamicAllocation.enabled", "false") \
+  .config("spark.executor.instances", "8") \
+  .config("spark.executor.memory", "32g") \
+  .config("spark.executor.cores", "4") \
+  .config("spark.driver.memory", "16g") \
+  .config("spark.sql.shuffle.partitions", "256") \
+  .config("spark.memory.offHeap.enabled", True) \
+  .config("spark.memory.offHeap.size", "32g") \
+  .config("spark.executor.memoryOverhead", "4g") \
+  .config("spark.driver.maxResultSize", "4g") \
+  .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+  .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+  .getOrCreate()
+'''
+
 interactions_df = spark.read.parquet(INTERACTION_PARQUET).select('user_id', 'book_id')
 print('# getting unique users')
 unique_user_ids = interactions_df.select('user_id').distinct().rdd.flatMap(lambda x: x).collect()
@@ -82,7 +118,7 @@ from collections import defaultdict
 user_to_books = defaultdict(list)
 book_to_users = defaultdict(list)
 
-for row in interactions_df.select('user_id', 'book_id').rdd.collect():
+for row in tqdm(interactions_df.select('user_id', 'book_id').rdd.collect()):
   user_to_books[row['user_id']].append(row['book_id'])
   book_to_users[row['book_id']].append(row['user_id'])
 
@@ -90,13 +126,27 @@ for row in interactions_df.select('user_id', 'book_id').rdd.collect():
 '''
 
 from pyspark.sql.functions import collect_list
+USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books_dict.parquet'
 
 print('#  Creating user 2 books dict')
 user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
+user_to_books_df.write.parquet(USER2BOOKS_FP)
+exit(0)
+
+'''
 user_to_books = {row['user_id']: row['books'] for row in user_to_books_df.collect()}
+batch_size = 10000  # Adjust as needed
+user_to_books = {}
+
+for start in range(0, user_to_books_df.count(), batch_size):
+  chunk = user_to_books_df.limit(batch_size).collect()
+  for row in chunk:
+    user_to_books[row['user_id']] = row['books']
+
 print('#  Creating book 2 users dict')
 book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
 book_to_users = {row['book_id']: row['users'] for row in book_to_users_df.collect()}
+'''
 
 with open(USER2BOOKS_FP, 'wb') as f: pickle.dump(user_to_books, f)
 with open(BOOK2USERS_FP, 'wb') as f: pickle.dump(book_to_users, f)
