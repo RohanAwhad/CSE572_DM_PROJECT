@@ -80,6 +80,10 @@ if os.path.exists(TRAIN_USER_IDS_FP) and os.path.exists(TEST_USER_IDS_FP) and os
     book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
 
 
+    print(user_to_books_df.head())
+    print(book_to_users_df.head())
+
+
 else:
     spark = SparkSession.builder \
             .appName('GoodreadsDataProcessing') \
@@ -117,12 +121,12 @@ else:
 
     print('#  Creating user 2 books dict')
     user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
-    #user_to_books_df = user_to_books_df.withColumn('user_id', col('user_id').cast('string'))
+    user_to_books_df = user_to_books_df.withColumn('user_id', col('user_id').cast('string'))
     #user_to_books_df = user_to_books_df.withColumn('books', col('books').cast('array<string>'))
 
     print('#  Creating book 2 users dict')
     book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
-    #book_to_users_df = book_to_users_df.withColumn('book_id', col('book_id').cast('string'))
+    book_to_users_df = book_to_users_df.withColumn('book_id', col('book_id').cast('string'))
     #book_to_users_df = book_to_users_df.withColumn('users', col('users').cast('array<string>'))
 
     print('#  collapsing partitioned parquet files into 1')
@@ -169,12 +173,12 @@ train_book_embeddings = embeddings[train_embedding_indices]
 # ===
 # Popularity based on Average Rating
 # ===
-sc: SparkContext = SparkContext(appName="PopularitySort")
-
 # Write BOOK_RATINGS to disk
 BOOK_RATINGS_FP = '/scratch/rawhad/CSE572/project/data/book_ratings.pkl'
 
 if not os.path.exists(BOOK_RATINGS_FP):
+  sc: SparkContext = SparkContext(appName="PopularitySort")
+
   BOOK_RATINGS = sc.textFile(BOOK_JSON) \
                  .map(json.loads) \
                  .filter(lambda x: 'book_id' in x and 'average_rating' in x and x['average_rating'] != '') \
@@ -184,13 +188,13 @@ if not os.path.exists(BOOK_RATINGS_FP):
   BOOK_RATINGS_LIST = BOOK_RATINGS.collect()
   with open(BOOK_RATINGS_FP, 'wb') as f:
     pickle.dump(BOOK_RATINGS_LIST, f)
+  sc.stop()
 else:
   # Load BOOK_RATINGS from disk
   with open(BOOK_RATINGS_FP, 'rb') as f:
     BOOK_RATINGS_LIST = pickle.load(f)
+  print(BOOK_RATINGS_LIST[:10])
 
-  # You can convert it back to an RDD if needed
-  BOOK_RATINGS = sc.parallelize(BOOK_RATINGS_LIST)
 
 # ===
 # Recommendations
@@ -217,11 +221,13 @@ def reciprocal_rank_fusion(rankings, k=60):
   return [item for item, _ in fused_scores.most_common()]
 
 def recommendations(user_id: str, book_ids: list[str], n):
+  if len(book_ids) > 0: print('type of book_ids[0]:', type(book_ids[0]))
+
   if len(book_ids) == 0:
     return get_top_books(book_ids, n)
   
   top_books = [book for book in get_top_books(book_ids, n) if book not in book_ids]
-  cf_books = list(map(str, collaborative_filtering(int(user_id), list(map(int, book_ids)), n)))
+  cf_books = collaborative_filtering(user_id, book_ids, n)
   cb_books = content_based_filtering(book_ids, n)
   
   popularity_weight = 1 / (1 + np.exp(-len(book_ids)/20))
@@ -244,7 +250,12 @@ def recommendations(user_id: str, book_ids: list[str], n):
 
 
 def get_top_books(read_book_ids: list[str], n=10) -> list[str]:
-  return BOOK_RATINGS.filter(lambda x: x not in read_book_ids).take(n)
+  ret = []
+  for x in BOOK_RATINGS_LIST:
+    if x not in read_book_ids: ret.append(x)
+    if len(ret) == n: return ret
+  return ret
+
 
 from sklearn.metrics.pairwise import cosine_distances
 
@@ -286,19 +297,18 @@ def content_based_filtering(book_ids: list[str], n) -> list[str]:
 
 
 
-def collaborative_filtering(user_id: int, book_ids: list[int], n) -> list[str]:
+def collaborative_filtering(user_id: str, book_ids: list[str], n) -> list[str]:
   # Find similar users who have read the same books
   similar_users = set()
   for book_id in book_ids:
     if book_id in book_to_users_df.index:
-      print('Similar Users:', book_to_users_df.loc[book_id, 'users'])
-      similar_users.update(book_to_users_df.loc[book_id, 'users'])
+      similar_users.update(list(map(str, book_to_users_df.loc[book_id, 'users'])))
 
   # Collect books read by similar users excluding those already read
   candidate_books = Counter()
   for similar_user in similar_users:
     if similar_user != user_id and similar_user in user_to_books_df.index:
-      for book_id in user_to_books_df.loc[similar_user, 'books']:
+      for book_id in map(str, user_to_books_df.loc[similar_user, 'books']):
         if book_id not in book_ids:
           candidate_books[book_id] += 1
 
@@ -309,8 +319,8 @@ def collaborative_filtering(user_id: int, book_ids: list[int], n) -> list[str]:
 
 if __name__ == '__main__':
   test_book_ids = list(test_book_set)
-  print('Recommendation 1:', recommendations(test_user_ids[0], [], 10))
-  print('Recommendation 2:', recommendations(test_user_ids[2], test_book_ids[:3], 10))
+  print('Recommendation 1:', recommendations(str(test_user_ids[0]), [], 10))
+  print('Recommendation 2:', recommendations(str(test_user_ids[2]), test_book_ids[:3], 10))
 
   import numpy as np
   from sklearn.metrics import ndcg_score
@@ -348,9 +358,9 @@ if __name__ == '__main__':
   def evaluate_model(test_users, num_users_to_evaluate=1000):
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
-    for user_id in tqdm(test_users[:num_users_to_evaluate], total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
-      if int(user_id) in user_to_books_df.index:
-        true_items = list(map(str, user_to_books_df.loc[int(user_id), 'books']))
+    for user_id in tqdm(map(str, test_users[:num_users_to_evaluate]), total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
+      if user_id in user_to_books_df.index:
+        true_items = list(map(str, user_to_books_df.loc[user_id, 'books']))
         
         # Split true items into history and test set
         history = true_items[:len(true_items)//2]
@@ -364,6 +374,8 @@ if __name__ == '__main__':
         
         for metric, value in results.items():
           all_results[metric].append(value)
+      else:
+        print(user_id, 'not found in user_to_books_df')
     
     # Calculate average results
     avg_results = {metric: np.mean(values) for metric, values in all_results.items()}
@@ -384,9 +396,9 @@ if __name__ == '__main__':
   def evaluate_cold_start(test_users, num_users_to_evaluate=1000):
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
-    for user_id in test_users[:num_users_to_evaluate]:
-      if int(user_id) in user_to_books_df.index:
-        true_items = list(map(str, user_to_books_df.loc[int(user_id), 'books']))
+    for user_id in tqdm(map(str, test_users[:num_users_to_evaluate]), total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
+      if user_id in user_to_books_df.index:
+        true_items = list(map(str, user_to_books_df.loc[user_id, 'books']))
         
         # Get recommendations for cold start (empty history)
         predicted_items = recommendations(user_id, [], n=100)
@@ -468,6 +480,4 @@ if __name__ == '__main__':
     pickle.dump(all_results, f)
 
   print("\nAll results saved in 'all_results.pkl'")
-
-sc.stop()
 
