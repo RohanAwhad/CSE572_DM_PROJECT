@@ -69,6 +69,17 @@ if os.path.exists(TRAIN_USER_IDS_FP) and os.path.exists(TEST_USER_IDS_FP) and os
     user_to_books_df = pd.read_parquet(USER2BOOKS_FP)
     book_to_users_df = pd.read_parquet(BOOK2USERS_FP)
 
+    # set user_id in user_to_books_df as str and books as list[str]
+    # set book_id in book_to_users_df as str and users as list[str]
+    user_to_books_df['user_id'] = user_to_books_df['user_id'].astype(str)
+    user_to_books_df['books'] = user_to_books_df['books'].apply(lambda x: list(map(str, x)))
+    user_to_books_df = user_to_books_df.set_index('user_id', drop=True)
+
+    book_to_users_df['book_id'] = book_to_users_df['book_id'].astype(str)
+    book_to_users_df['users'] = book_to_users_df['users'].apply(lambda x: list(map(str, x)))
+    book_to_users_df = book_to_users_df.set_index('book_id', drop=True)
+
+
 else:
     spark = SparkSession.builder \
             .appName('GoodreadsDataProcessing') \
