@@ -265,19 +265,43 @@ def get_top_books(read_book_ids: list[str], n=10) -> list[str]:
   return ret
 
 
-from sklearn.metrics.pairwise import cosine_similarity
-# Precompute similarity matrix
-similarity_matrix = cosine_similarity(embeddings)
-np.save('similarity_matrix.npy', similarity_matrix)
+from sklearn.metrics.pairwise import cosine_distances
 
-def get_similar_books(book_ids, n):
-    if not book_ids:
-        return []
-    # Use precomputed matrix
-    book_indices = [book_id_to_index[b] for b in book_ids if b in book_id_to_index]
-    sim_scores = similarity_matrix[book_indices].mean(axis=0)
-    top_indices = np.argsort(sim_scores)[::-1][:n]
-    return [book_ids_with_embeddings[i] for i in top_indices if book_ids_with_embeddings[i] not in book_ids][:n]
+def content_based_filtering(book_ids: list[str], n) -> list[str]:
+  # Check if any of the book_ids have embeddings
+  valid_book_ids = [book_id for book_id in book_ids if book_id in book_id_to_index]
+  
+  if not valid_book_ids:
+    return []
+
+  # Get embeddings for input book IDs
+  book_embeddings = embeddings[[book_id_to_index[book_id] for book_id in valid_book_ids]]
+
+  # Calculate cosine distances between input books and all books with embeddings
+  distances = cosine_distances(book_embeddings, embeddings)
+
+  # Get similar books, excluding already read ones
+  similar_books = []
+  for dist in distances:
+    similar_indices = np.argsort(dist)[:10 + len(book_ids)]
+    for idx in similar_indices:
+      similar_id = book_ids_with_embeddings[idx]
+      if similar_id not in book_ids:
+        similar_books.append((similar_id, dist[idx]))
+
+  # Sort and get unique similar books
+  similar_books = sorted(similar_books, key=lambda x: x[1])
+  unique_similar_books = []
+  seen = set()
+  
+  for book_id, _ in similar_books:
+    if book_id not in seen:
+      unique_similar_books.append(book_id)
+      seen.add(book_id)
+      if len(unique_similar_books) == n:
+        break
+
+  return unique_similar_books
 
 
 
@@ -365,7 +389,7 @@ if __name__ == '__main__':
     
     return results
 
-  def evaluate_model(test_users, num_users_to_evaluate=1000):
+  def evaluate_model(test_users, num_users_to_evaluate=10):
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
     for user_id in tqdm(map(str, test_users[:num_users_to_evaluate]), total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
@@ -403,7 +427,7 @@ if __name__ == '__main__':
 
 
   # also evaluate for cold starts
-  def evaluate_cold_start(test_users, num_users_to_evaluate=1000):
+  def evaluate_cold_start(test_users, num_users_to_evaluate=10):
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
     for user_id in tqdm(map(str, test_users[:num_users_to_evaluate]), total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
