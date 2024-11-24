@@ -150,13 +150,27 @@ train_book_embeddings = embeddings[train_embedding_indices]
 # Popularity based on Average Rating
 # ===
 sc: SparkContext = SparkContext(appName="PopularitySort")
-BOOK_RATINGS = sc.textFile(BOOK_JSON) \
-               .map(json.loads) \
-               .filter(lambda x: 'book_id' in x and 'average_rating' in x and x['average_rating'] != '') \
-               .map(lambda x: (x['book_id'], float(x['average_rating']))) \
-               .sortBy(lambda x: x[1], ascending=False) \
-               .map(lambda x: x[0])
 
+# Write BOOK_RATINGS to disk
+BOOK_RATINGS_FP = '/scratch/rawhad/CSE572/project/data/book_ratings.pkl'
+
+if not os.path.exists(BOOK_RATINGS_FP):
+  BOOK_RATINGS = sc.textFile(BOOK_JSON) \
+                 .map(json.loads) \
+                 .filter(lambda x: 'book_id' in x and 'average_rating' in x and x['average_rating'] != '') \
+                 .map(lambda x: (x['book_id'], float(x['average_rating']))) \
+                 .sortBy(lambda x: x[1], ascending=False) \
+                 .map(lambda x: x[0])
+  BOOK_RATINGS_LIST = BOOK_RATINGS.collect()
+  with open(BOOK_RATINGS_FP, 'wb') as f:
+    pickle.dump(BOOK_RATINGS_LIST, f)
+else:
+  # Load BOOK_RATINGS from disk
+  with open(BOOK_RATINGS_FP, 'rb') as f:
+    BOOK_RATINGS_LIST = pickle.load(f)
+
+  # You can convert it back to an RDD if needed
+  BOOK_RATINGS = sc.parallelize(BOOK_RATINGS_LIST)
 
 # ===
 # Recommendations
