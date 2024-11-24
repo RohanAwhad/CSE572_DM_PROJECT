@@ -257,43 +257,19 @@ def get_top_books(read_book_ids: list[str], n=10) -> list[str]:
   return ret
 
 
-from sklearn.metrics.pairwise import cosine_distances
+from sklearn.metrics.pairwise import cosine_similarity
+# Precompute similarity matrix
+similarity_matrix = cosine_similarity(embeddings)
+np.save('similarity_matrix.npy', similarity_matrix)
 
-def content_based_filtering(book_ids: list[str], n) -> list[str]:
-  # Check if any of the book_ids have embeddings
-  valid_book_ids = [book_id for book_id in book_ids if book_id in book_id_to_index]
-  
-  if not valid_book_ids:
-    return []
-
-  # Get embeddings for input book IDs
-  book_embeddings = embeddings[[book_id_to_index[book_id] for book_id in valid_book_ids]]
-
-  # Calculate cosine distances between input books and all books with embeddings
-  distances = cosine_distances(book_embeddings, embeddings)
-
-  # Get similar books, excluding already read ones
-  similar_books = []
-  for dist in distances:
-    similar_indices = np.argsort(dist)[:10 + len(book_ids)]
-    for idx in similar_indices:
-      similar_id = book_ids_with_embeddings[idx]
-      if similar_id not in book_ids:
-        similar_books.append((similar_id, dist[idx]))
-
-  # Sort and get unique similar books
-  similar_books = sorted(similar_books, key=lambda x: x[1])
-  unique_similar_books = []
-  seen = set()
-  
-  for book_id, _ in similar_books:
-    if book_id not in seen:
-      unique_similar_books.append(book_id)
-      seen.add(book_id)
-      if len(unique_similar_books) == n:
-        break
-
-  return unique_similar_books
+def get_similar_books(book_ids, n):
+    if not book_ids:
+        return []
+    # Use precomputed matrix
+    book_indices = [book_id_to_index[b] for b in book_ids if b in book_id_to_index]
+    sim_scores = similarity_matrix[book_indices].mean(axis=0)
+    top_indices = np.argsort(sim_scores)[::-1][:n]
+    return [book_ids_with_embeddings[i] for i in top_indices if book_ids_with_embeddings[i] not in book_ids][:n]
 
 
 
@@ -316,6 +292,32 @@ def collaborative_filtering(user_id: str, book_ids: list[str], n) -> list[str]:
   ranked_books = [book_id for book_id, _ in candidate_books.most_common(n)]
   return ranked_books
 
+
+'''
+# how do I make the recommendations fast?
+Recommendation 1: ['18283092', '27189830', '11371089', '29065952', '13598466', '30330416', '32615018', '6016342', '25918513', '15524469']
+type of book_ids[0]: <class 'str'>
+Time taken to get top books: 0.004667788743972778 ms
+Time taken to get cf books: 691.8498920276761 ms
+Time taken to get cb books: 3530.574862845242 ms
+Recommendation 2: ['18283092', '1574', '10099016', '27189830', '941', '33642771', '11371089', '613', '15823422', '29065952']
+Evaluating:   0%|                                                                                                                                                                                                                                                                                                                                                    | 0/1000 [00:00<?, ?it/s]type of book_ids[0]: <class 'str'>
+Time taken to get top books: 0.02619996666908264 ms
+Time taken to get cf books: 17156.324069947004 ms
+Time taken to get cb books: 3220.3661892563105 ms
+Evaluating:   0%|▎                                                                                                                                                                                                                                                                                                                                         | 1/1000 [00:20<5:39:19, 20.38s/it]type of book_ids[0]: <class 'str'>
+Time taken to get top books: 0.02926494926214218 ms
+Time taken to get cf books: 188.972654286772 ms
+Time taken to get cb books: 3677.435555960983 ms
+Evaluating:   0%|▋                                                                                                                                                                                                                                                                                                                                         | 2/1000 [00:24<2:57:26, 10.67s/it]type of book_ids[0]: <class 'str'>
+Time taken to get top books: 0.028452835977077484 ms
+Time taken to get cf books: 13.244841247797012 ms
+Time taken to get cb books: 0.010048970580101013 ms
+type of book_ids[0]: <class 'str'>
+
+
+
+'''
 
 if __name__ == '__main__':
   test_book_ids = list(test_book_set)
