@@ -4,6 +4,8 @@
 
 from pyspark import SparkContext
 import json
+import os
+import pandas as pd
 import pickle
 import random
 
@@ -11,33 +13,38 @@ BOOK_JSON: str = '/scratch/rawhad/CSE572/project/data/goodreads_books.json'
 TRAIN_BOOK_IDS_FP: str = '/scratch/rawhad/CSE572/project/data/train_book_ids.pkl'
 TEST_BOOK_IDS_FP: str = '/scratch/rawhad/CSE572/project/data/test_book_ids.pkl'
 
-# Initialize Spark context
-sc: SparkContext = SparkContext(appName="BookSplit")
+if os.path.exists(TRAIN_BOOK_IDS_FP) and os.path.exists(TEST_BOOK_IDS_FP):
+    # load
+    with open(TRAIN_BOOK_IDS_FP, 'rb') as f: train_book_set = pickle.load(f)
+    with open(TEST_BOOK_IDS_FP, 'rb') as f: test_book_set = pickle.load(f)
+else:
+    # Initialize Spark context
+    sc: SparkContext = SparkContext(appName="BookSplit")
 
-print('getting all_book ids')
-book_data = sc.textFile(BOOK_JSON)
-all_book_ids = book_data.map(lambda x: x.strip()) \
-                        .filter(lambda x: len(x) > 0) \
-                        .map(json.loads) \
-                        .filter(lambda x: 'book_id' in x) \
-                        .map(lambda x: x['book_id']) \
-                        .collect()
+    print('getting all_book ids')
+    book_data = sc.textFile(BOOK_JSON)
+    all_book_ids = book_data.map(lambda x: x.strip()) \
+                            .filter(lambda x: len(x) > 0) \
+                            .map(json.loads) \
+                            .filter(lambda x: 'book_id' in x) \
+                            .map(lambda x: x['book_id']) \
+                            .collect()
 
-print('splitting into train test sets')
-random.shuffle(all_book_ids)
-num_test_books: int = int(0.2 * len(all_book_ids))
-test_book_set: list = all_book_ids[:num_test_books]
-train_book_set: list = all_book_ids[num_test_books:]
+    print('splitting into train test sets')
+    random.shuffle(all_book_ids)
+    num_test_books: int = int(0.2 * len(all_book_ids))
+    test_book_set: list = all_book_ids[:num_test_books]
+    train_book_set: list = all_book_ids[num_test_books:]
 
-# save
-with open(TRAIN_BOOK_IDS_FP, 'wb') as f:
-  pickle.dump(train_book_set, f)
+    # save
+    with open(TRAIN_BOOK_IDS_FP, 'wb') as f:
+      pickle.dump(train_book_set, f)
 
-with open(TEST_BOOK_IDS_FP, 'wb') as f:
-  pickle.dump(test_book_set, f)
+    with open(TEST_BOOK_IDS_FP, 'wb') as f:
+      pickle.dump(test_book_set, f)
 
-# Stop Spark context
-sc.stop()
+    # Stop Spark context
+    sc.stop()
 
 
 # ===
@@ -50,134 +57,110 @@ INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/goodreads_interaction
 TRAIN_INTERACTION_PARQUET = '/scratch/rawhad/CSE572/project/data/train_interactions.parquet'
 TRAIN_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/train_user_ids.pkl'
 TEST_USER_IDS_FP = '/scratch/rawhad/CSE572/project/data/test_used_ids.pkl'
-USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books_dict.pkl'
-BOOK2USERS_FP = '/scratch/rawhad/CSE572/project/data/book_to_users_dict.pkl'
+USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books.parquet'
+BOOK2USERS_FP = '/scratch/rawhad/CSE572/project/data/book_to_users.parquet'
 
-spark = SparkSession.builder \
-        .appName('GoodreadsDataProcessing') \
-        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-        .config("spark.dynamicAllocation.enabled", "true") \
-        .config("spark.dynamicAllocation.minExecutors", "1") \
-        .config("spark.dynamicAllocation.maxExecutors", "10") \
-        .config("spark.sql.shuffle.partitions", "1200") \
-        .config("spark.executor.memory", "250g") \
-        .config("spark.driver.memory", "250g") \
-        .config("spark.memory.offHeap.enabled",True) \
-        .config("spark.memory.offHeap.size","256g") \
-        .config("spark.shuffle.compress", True) \
-        .config("spark.shuffle.spill.compress", True) \
-        .config("spark.executor.memoryOverhead", "10g")  \
-        .config("spark.driver.maxResultSize", "10g") \
-        .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
-        .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
-        .getOrCreate()
-'''
-spark = SparkSession.builder \
-  .appName('GoodreadsDataProcessing') \
-  .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-  .config("spark.dynamicAllocation.enabled", "false") \
-  .config("spark.executor.instances", "8") \
-  .config("spark.executor.memory", "32g") \
-  .config("spark.executor.cores", "4") \
-  .config("spark.driver.memory", "16g") \
-  .config("spark.sql.shuffle.partitions", "256") \
-  .config("spark.memory.offHeap.enabled", True) \
-  .config("spark.memory.offHeap.size", "32g") \
-  .config("spark.executor.memoryOverhead", "4g") \
-  .config("spark.driver.maxResultSize", "4g") \
-  .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
-  .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
-  .getOrCreate()
-'''
 
-interactions_df = spark.read.parquet(INTERACTION_PARQUET).select('user_id', 'book_id')
-print('# getting unique users')
-unique_user_ids = interactions_df.select('user_id').distinct().rdd.flatMap(lambda x: x).collect()
-print('# Shuffle and split user IDs')
-random.shuffle(unique_user_ids)
-num_test_users = int(0.2 * len(unique_user_ids))
-test_user_ids = unique_user_ids[:num_test_users]
-train_user_ids = unique_user_ids[num_test_users:]
-#print('# Filter out rows with book_id in test_book_set')
-#print('#   Broadcast sets')
-#train_book_set_bc = spark.sparkContext.broadcast(set(train_book_set))
-#train_user_ids_bc = spark.sparkContext.broadcast(set(train_user_ids))
-#train_interactions_df = interactions_df.filter((col('book_id').isin(train_book_set_bc.value)) & (col('user_id').isin(train_user_ids_bc.value)))
-#print('# Save')
-#train_interactions_df.write.parquet(TRAIN_INTERACTION_PARQUET)
-with open(TRAIN_USER_IDS_FP, 'wb') as f: pickle.dump(train_user_ids, f)
-with open(TEST_USER_IDS_FP, 'wb') as f: pickle.dump(test_user_ids, f)
+if os.path.exists(TRAIN_USER_IDS_FP) and os.path.exists(TEST_USER_IDS_FP) and os.path.exists(USER2BOOKS_FP) and os.path.exists(BOOK2USERS_FP):
+    with open(TRAIN_USER_IDS_FP, 'rb') as f: train_user_ids = pickle.load(f)
+    with open(TEST_USER_IDS_FP, 'rb') as f: test_user_ids = pickle.load(f)
+    # Load the Parquet files into Pandas DataFrames
+    user_to_books_df = pd.read_parquet(USER2BOOKS_FP)
+    book_to_users_df = pd.read_parquet(BOOK2USERS_FP)
+
+else:
+    spark = SparkSession.builder \
+            .appName('GoodreadsDataProcessing') \
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+            .config("spark.dynamicAllocation.enabled", "true") \
+            .config("spark.dynamicAllocation.minExecutors", "1") \
+            .config("spark.dynamicAllocation.maxExecutors", "10") \
+            .config("spark.sql.shuffle.partitions", "1200") \
+            .config("spark.executor.memory", "32g") \
+            .config("spark.driver.memory", "32g") \
+            .config("spark.memory.offHeap.enabled",True) \
+            .config("spark.memory.offHeap.size","32g") \
+            .config("spark.shuffle.compress", True) \
+            .config("spark.shuffle.spill.compress", True) \
+            .config("spark.executor.memoryOverhead", "10g")  \
+            .config("spark.driver.maxResultSize", "10g") \
+            .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+            .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35") \
+            .getOrCreate()
+
+    interactions_df = spark.read.parquet(INTERACTION_PARQUET).select('user_id', 'book_id')
+    print('# getting unique users')
+    unique_user_ids = interactions_df.select('user_id').distinct().rdd.flatMap(lambda x: x).collect()
+    print('# Shuffle and split user IDs')
+    random.shuffle(unique_user_ids)
+    num_test_users = int(0.2 * len(unique_user_ids))
+    test_user_ids = unique_user_ids[:num_test_users]
+    train_user_ids = unique_user_ids[num_test_users:]
+    #print('# Filter out rows with book_id in test_book_set')
+    #print('#   Broadcast sets')
+    #train_book_set_bc = spark.sparkContext.broadcast(set(train_book_set))
+    #train_user_ids_bc = spark.sparkContext.broadcast(set(train_user_ids))
+    #train_interactions_df = interactions_df.filter((col('book_id').isin(train_book_set_bc.value)) & (col('user_id').isin(train_user_ids_bc.value)))
+    #print('# Save')
+    #train_interactions_df.write.parquet(TRAIN_INTERACTION_PARQUET)
+    with open(TRAIN_USER_IDS_FP, 'wb') as f: pickle.dump(train_user_ids, f)
+    with open(TEST_USER_IDS_FP, 'wb') as f: pickle.dump(test_user_ids, f)
 
 
 
+    from pyspark.sql.functions import collect_list
 
-'''
-from collections import defaultdict
+    print('#  Creating user 2 books dict')
+    user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
+    print('#  Creating book 2 users dict')
+    book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
+    print('#  collapsing partitioned parquet files into 1')
+    user_to_books_df.coalesce(1).write.mode("overwrite").parquet(USER2BOOKS_FP)
+    book_to_users_df.coalesce(1).write.mode("overwrite").parquet(BOOK2USERS_FP)
+    spark.stop()
 
-# Convert interactions_df to dictionaries
-user_to_books = defaultdict(list)
-book_to_users = defaultdict(list)
-
-for row in tqdm(interactions_df.select('user_id', 'book_id').rdd.collect()):
-  user_to_books[row['user_id']].append(row['book_id'])
-  book_to_users[row['book_id']].append(row['user_id'])
-
-#how can I do this using pyspark?
-'''
-
-from pyspark.sql.functions import collect_list
-USER2BOOKS_FP = '/scratch/rawhad/CSE572/project/data/user_to_books_dict.parquet'
-
-print('#  Creating user 2 books dict')
-user_to_books_df = interactions_df.groupBy('user_id').agg(collect_list('book_id').alias('books'))
-user_to_books_df.write.parquet(USER2BOOKS_FP)
-exit(0)
-
-'''
-user_to_books = {row['user_id']: row['books'] for row in user_to_books_df.collect()}
-batch_size = 10000  # Adjust as needed
-user_to_books = {}
-
-for start in range(0, user_to_books_df.count(), batch_size):
-  chunk = user_to_books_df.limit(batch_size).collect()
-  for row in chunk:
-    user_to_books[row['user_id']] = row['books']
-
-print('#  Creating book 2 users dict')
-book_to_users_df = interactions_df.groupBy('book_id').agg(collect_list('user_id').alias('users'))
-book_to_users = {row['book_id']: row['users'] for row in book_to_users_df.collect()}
-'''
-
-with open(USER2BOOKS_FP, 'wb') as f: pickle.dump(user_to_books, f)
-with open(BOOK2USERS_FP, 'wb') as f: pickle.dump(book_to_users, f)
-
-spark.stop()
 
 
 # ===
 # Book Description Embeddings Matrix 
 # ===
-BOOK_IDS_PKL = '/scratch/rawhad/CSE572/project/data/all_book_ids.pkl'  # book_ids with embeddings of description
-EMBEDDINGS_NPY = '/scratch/rawhad/CSE572/project/data/all_embeddings.npy'  # embeddings[idx] are embeddings of book[book_ids[idx]]['desc']
-
-# create an embedding matrix for books in training set
-# laod book_ids_pkl => list[book_ids] and EMBEDDINGS_NPY => np.array(len(book_ids), 384)
-# then get embedding_indices for train set and then claw out the train books embedding matrix
-# ignore book ids not present
 import numpy as np
 
-# Load book IDs and embeddings
-with open(BOOK_IDS_PKL, 'rb') as f: book_ids_with_embeddings = pickle.load(f)
-embeddings = np.load(EMBEDDINGS_NPY)
-# Create a mapping of book IDs to their embedding index
-book_id_to_index = {book_id: idx for idx, book_id in enumerate(book_ids_with_embeddings)}
-# Get embedding indices for train set
-train_embedding_indices = [book_id_to_index[book_id] for book_id in train_book_set if book_id in book_id_to_index]
-# Extract embeddings for the train set
-train_book_embeddings = embeddings[train_embedding_indices]
-# Save train book embeddings
+BOOK_IDS_PKL = '/scratch/rawhad/CSE572/project/data/all_book_ids.pkl'  # book_ids with embeddings of description
+EMBEDDINGS_NPY = '/scratch/rawhad/CSE572/project/data/all_embeddings.npy'  # embeddings[idx] are embeddings of book[book_ids[idx]]['desc']
 TRAIN_BOOK_EMBEDDINGS_NPY = '/scratch/rawhad/CSE572/project/data/train_book_embeddings.npy'
-np.save(TRAIN_BOOK_EMBEDDINGS_NPY, train_book_embeddings)
+
+if os.path.exists(TRAIN_BOOK_EMBEDDINGS_NPY):
+    train_book_embeddings = np.load(TRAIN_BOOK_EMBEDDINGS_NPY)
+else:
+    # create an embedding matrix for books in training set
+    # laod book_ids_pkl => list[book_ids] and EMBEDDINGS_NPY => np.array(len(book_ids), 384)
+    # then get embedding_indices for train set and then claw out the train books embedding matrix
+    # ignore book ids not present
+
+    # Load book IDs and embeddings
+    with open(BOOK_IDS_PKL, 'rb') as f: book_ids_with_embeddings = pickle.load(f)
+    embeddings = np.load(EMBEDDINGS_NPY)
+    # Create a mapping of book IDs to their embedding index
+    book_id_to_index = {book_id: idx for idx, book_id in enumerate(book_ids_with_embeddings)}
+    # Get embedding indices for train set
+    train_embedding_indices = [book_id_to_index[book_id] for book_id in train_book_set if book_id in book_id_to_index]
+    # Extract embeddings for the train set
+    train_book_embeddings = embeddings[train_embedding_indices]
+    # Save train book embeddings
+    np.save(TRAIN_BOOK_EMBEDDINGS_NPY, train_book_embeddings)
+
+
+# ===
+# Popularity based on Average Rating
+# ===
+sc: SparkContext = SparkContext(appName="PopularitySort")
+BOOK_RATINGS = sc.textFile(BOOK_JSON) \
+               .map(json.loads) \
+               .filter(lambda x: 'book_id' in x and 'average_rating' in x and x['average_rating'] != '') \
+               .map(lambda x: (x['book_id'], float(x['average_rating']))) \
+               .sortBy(lambda x: x[1], ascending=False) \
+               .map(lambda x: x[0])
 
 
 # ===
@@ -206,9 +189,9 @@ def reciprocal_rank_fusion(rankings, k=60):
 
 def recommendations(user_id, book_ids):
   if len(book_ids) == 0:
-    return get_top_books()
+    return get_top_books(book_ids)
   
-  top_books = [book for book in get_top_books() if book not in book_ids]
+  top_books = [book for book in get_top_books(book_ids) if book not in book_ids]
   cf_books = collaborative_filtering(user_id, book_ids)
   cb_books = content_based_filtering(book_ids)
   
@@ -232,14 +215,7 @@ def recommendations(user_id, book_ids):
 
 
 def get_top_books(read_book_ids, n=10) -> list[str]:
-  book_ratings = sc.textFile(BOOK_JSON) \
-                   .map(json.loads) \
-                   .filter(lambda x: 'book_id' in x and 'average_rating' in x and x['book_id'] not in read_book_ids) \
-                   .map(lambda x: (x['book_id'], float(x['average_rating']))) \
-                   .sortBy(lambda x: x[1], ascending=False) \
-                   .map(lambda x: x[0]) \
-                   .take(n)
-  return book_ratings
+  return BOOK_RATINGS.filter(lambda x: x['book_id'] not in read_book_ids).take(n)
 
 
 
@@ -283,30 +259,6 @@ def content_based_filtering(book_ids) -> list[str]:
 
 
 
-'''
-def collaborative_filtering(user_id, book_ids) -> list[str]:
-  # Example function to perform collaborative filtering
-  # Use RDDs or DataFrames to fetch similar users and find books
-  similar_users = interactions_df.filter(col('book_id').isin(book_ids) &
-                                         ~col('user_id').isin([user_id])) \
-                                  .select('user_id') \
-                                  .distinct() \
-                                  .rdd.flatMap(lambda x: x).collect()
-  recommended_books = interactions_df.filter(col('user_id').isin(similar_users) &
-                                             ~col('book_id').isin(book_ids)) \
-                                     .groupBy('book_id') \
-                                     .count() \
-                                     .orderBy('count', ascending=False) \
-                                     .select('book_id') \
-                                     .rdd.flatMap(lambda x: x).take(10)
-  return recommended_books
-
-
-i would first like to convert interactions_df into 2 dictionaries, one will have user_id as key and list of book_ids as values and the other will have book_id as key and list[user_ids] as values.
-And then use those to do collaborative filtering
-'''
-
-
 def collaborative_filtering(user_id, book_ids) -> list[str]:
   # Find similar users who have read the same books
   similar_users = set()
@@ -326,3 +278,7 @@ def collaborative_filtering(user_id, book_ids) -> list[str]:
   top_recommended_books = [book for book, _ in book_recommendations.most_common(10)]
   
   return top_recommended_books
+
+
+if __name__ == '__main__':
+    print(recommendations(test_user_ids[0], []))
