@@ -3,6 +3,7 @@
 # ===
 
 from pyspark import SparkContext
+from tqdm import tqdm
 import json
 import os
 import pandas as pd
@@ -183,7 +184,7 @@ def reciprocal_rank_fusion(rankings, k=60):
 
 def recommendations(user_id, book_ids, n):
   if len(book_ids) == 0:
-    return get_top_books(book_ids, m)
+    return get_top_books(book_ids, n)
   
   top_books = [book for book in get_top_books(book_ids, n) if book not in book_ids]
   cf_books = collaborative_filtering(user_id, book_ids, n)
@@ -273,8 +274,8 @@ def collaborative_filtering(user_id, book_ids, n) -> list[str]:
 
 if __name__ == '__main__':
   test_book_ids = list(test_book_set)
-  print(recommendations(test_user_ids[0], []), 10)
-  print(recommendations(test_user_ids[2], test_book_ids[:3]), 10)
+  print(recommendations(test_user_ids[0], [], 10))
+  print(recommendations(test_user_ids[2], test_book_ids[:3], 10))
 
   import numpy as np
   from sklearn.metrics import ndcg_score
@@ -312,7 +313,7 @@ if __name__ == '__main__':
   def evaluate_model(test_users, num_users_to_evaluate=1000):
     all_results = {metric: [] for metric in ['NDCG@10', 'NDCG@20', 'Recall@10', 'Recall@20', 'Recall@50', 'Recall@100', 'Precision@1', 'Precision@2', 'Precision@5', 'Precision@10']}
     
-    for user_id in test_users[:num_users_to_evaluate]:
+    for user_id in tqdm(test_users[:num_users_to_evaluate], total=min(len(test_users), num_users_to_evaluate), desc='Evaluating'):
       if user_id in user_to_books_df.index:
         true_items = user_to_books_df.loc[user_id]
         
